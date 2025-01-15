@@ -1,6 +1,6 @@
 # Analysis Addon for R6 Dissect
 
-Please make sure to have an R6 Dissect folder in the root folder of this project.\
+Please make sure to have an "R6 Dissect" folder in the root folder of this project that contains [redraskal's r6-dissect](https://github.com/redraskal/r6-dissect).\
 Usage of this project is still a WIP.\
 Requires pandas.
 
