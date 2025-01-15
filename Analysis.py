@@ -5,12 +5,29 @@ import json
 pd.options.display.max_columns = None
 
 idCols = ["Player ID", "Match ID", "Round Number"]
-statCols = ["Kills", "Assists", "Deaths", "Headshots",
+statCols = ["Kills", "Assists", "Deaths", "Headshots", "KOST",
             "Pivot Kills", "Pivot Deaths", "Opening Kills", "Opening Deaths",
             "Trade Kills", "Traded Kills", "Traded Deaths", "Objective", "Wins", "Losses"]
 
 
-def analyzeMatch(jsonData: str, file=True):
+def analyzeMatches(jsons: list[str], shouldCompile=True):
+    dfs = []
+    for j in jsons:
+        dfs.append(analyzeMatch(j, file=True, shouldCompile=False))
+
+    totalDF = pd.concat(dfs, ignore_index=True)
+    if shouldCompile:
+        sumStats = totalDF[["Player ID"] + statCols]
+
+        sumStats = sumStats.groupby("Player ID").sum().reset_index(drop=False)
+        compiledStats = compileStats(sumStats)
+
+        return compiledStats
+    else:
+        return totalDF
+
+
+def analyzeMatch(jsonData: str, file=True, shouldCompile=True):
     if file:
         with open(jsonData, 'r') as f:
             data = json.load(f)
@@ -30,13 +47,15 @@ def analyzeMatch(jsonData: str, file=True):
 
     totalDF = pd.concat(roundDFs, ignore_index=True)
 
-    sumStats = totalDF[["Player ID"] + statCols]
+    if shouldCompile:
+        sumStats = totalDF[["Player ID"] + statCols]
 
-    sumStats = sumStats.groupby("Player ID").sum().reset_index(drop=False)
+        sumStats = sumStats.groupby("Player ID").sum().reset_index(drop=False)
+        compiledStats = compileStats(sumStats)
 
-    compiledStats = compileStats(sumStats)
-
-    return compiledStats
+        return compiledStats
+    else:
+        return totalDF
 
 
 def analyzeRound(r):
@@ -142,13 +161,16 @@ def analyzeRound(r):
 
     if planter is not None:
         df.loc[df["Player ID"] == planter, "Objective"] = 1
+        df.loc[df["Player ID"] == planter, "KOST"] = 1
 
     if defuser is not None:
         df.loc[df["Player ID"] == defuser, "Objective"] = 1
+        df.loc[df["Player ID"] == defuser, "KOST"] = 1
 
     for kill in killEvents:
         # print(kill)
         df.loc[df["Player ID"] == kill["killer"], "Kills"] += 1
+        df.loc[df["Player ID"] == kill["killer"], "KOST"] = 1
         df.loc[df["Player ID"] == kill["killer"], "Headshots"] += kill["headshot"]
         df.loc[df["Player ID"] == kill["killer"], "Pivot Kills"] += kill["pivotKill"]
         df.loc[df["Player ID"] == kill["killer"], "Opening Kills"] += kill["openingKill"]
@@ -159,6 +181,13 @@ def analyzeRound(r):
         df.loc[df["Player ID"] == kill["target"], "Pivot Deaths"] += kill["pivotKill"]
         df.loc[df["Player ID"] == kill["target"], "Opening Deaths"] += kill["openingKill"]
         df.loc[df["Player ID"] == kill["target"], "Traded Deaths"] += kill["traded"]
+        if kill["traded"] > 0:
+            df.loc[df["Player ID"] == kill["target"], "KOST"] = 1
+
+    for ID in IDToTeam.keys():
+        # print(df.loc[df["Player ID"] == ID, "Deaths"])
+        if df.loc[df["Player ID"] == ID, "Deaths"].values[0] == 0:
+            df.loc[df["Player ID"] == ID, "KOST"] = 1
 
     return df
 
@@ -166,6 +195,7 @@ def analyzeRound(r):
 def compileStats(df):
 
     df["HS%"] = df["Headshots"] / np.where(df['Kills'] < 1, 1, df['Kills']) * 100
+    df["KOST"] = df["KOST"] / (df["Wins"] + df["Losses"])
 
     for prefix in ["", "Pivot ", "Opening "]:
         df[prefix + 'K/D'] = df[prefix + 'Kills'] / np.where(df[prefix + 'Deaths'] < 1, 1, df[prefix + 'Deaths'])
@@ -179,3 +209,11 @@ def compileStats(df):
     df["Traded Death Ratio"] = df["Traded Deaths"] / np.where(df["Deaths"] < 1, 1, df["Deaths"])
 
     return df
+
+
+def findTeamStats(dataFile: str, teamIDs: dict[str, str]):
+    df = pd.read_csv(dataFile)
+
+    df.loc[df["Player ID"].isin(teamIDs.keys()), "Player ID"] = df.loc[df["Player ID"].isin(teamIDs.keys()), "Player ID"].replace(teamIDs)
+
+    return df[df["Player ID"].isin(teamIDs.values())].iloc[:, 1:].reset_index(drop=True)

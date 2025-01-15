@@ -1,30 +1,22 @@
 import subprocess
 import sys
+import os
+from Analysis import analyzeMatches
 
 
 def run_program():
-    # Step 1: Run the external program e.exe and capture its output
-    e_process = subprocess.Popen(
-        ["R6 Dissect/r6-dissect.exe", sys.argv[1]],  # Adjust arguments as needed
-        stdout=subprocess.PIPE,               # Capture stdout from e.exe
-        stderr=subprocess.PIPE                # Capture stderr from e.exe
-    )
+    targetDirectory = sys.argv[1] if len(sys.argv) > 1 else "R6 Dissect/Matches"
 
-    p_process = subprocess.Popen(
-        ["python", "Caller.py"],  # Running your Python program
-        stdin=e_process.stdout,  # Pipe e.exe's stdout to p.py's stdin
-        stdout=subprocess.PIPE,  # Capture the output from p.py
-        stderr=subprocess.PIPE  # Optionally capture stderr
-    )
+    matches = [f.path for f in os.scandir(targetDirectory) if f.is_dir()]
 
-    e_process.stdout.close()
+    for match in matches:
+        matchName = match.split("\\")[-1]
+        cmd = ["R6 Dissect/r6-dissect.exe", match, "-o", "R6 Dissect/Outputs/" + matchName + ".json"]
+        subprocess.run(cmd)
 
-    p_output, p_error = p_process.communicate()
-
-    if p_process.returncode != 0:
-        print(f"Error occurred in p.py: {p_error.decode('utf-8')}")
-    else:
-        print(p_output.decode('utf-8'))
+    jsonFiles = [f.path for f in os.scandir("R6 Dissect/Outputs") if not f.is_dir()]
+    df = analyzeMatches(jsonFiles, shouldCompile=True)
+    df.to_csv("Output/Results.csv")
 
 
 if __name__ == "__main__":
