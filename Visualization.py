@@ -7,27 +7,40 @@ from Analysis import metaAnalysisMatches, timeSlots
 import os
 
 
-def visualize(jsonFiles: list[str], displayThreshold=0.04):
+def visualize(jsonFiles: list[str], displayThreshold=0.04, perSite=True):
     mdf, s, o = metaAnalysisMatches(jsonFiles)
+
+    if not perSite:
+        def weightedAvg(group, weightCol, valCol):
+            return (group[valCol] * group[weightCol]).sum() / group[weightCol].sum()
+
+        mdf = mdf.groupby("Map").apply(
+            lambda g: pd.Series({
+                col: weightedAvg(g, "Rounds", col) for col in g.columns if col not in ["Map", "Site", "Rounds"]
+            })
+        ).reset_index()
+
+    print(mdf)
 
     atkSpawns, defSpawns = list(s[0]), list(s[1])
     atkOps, defOps = list(o[0]), list(o[1])
 
     for r in range(len(mdf)):
         row = mdf.iloc[r]
-        ID = row.iloc[:2]
-        roundCount = row.iloc[2]
-        winRates = row.iloc[3:5].values
+        ID = row["Map"]
+        if perSite:
+            ID += " : " + row["Site"]
+        winRates = row[["Attacker Win", "Defender Win"]].values
         pace = row["Pace"]
         kills = row["Kills"]
-        killTimes = row.iloc[7:14].values
-        plantStats = row.iloc[14:16].values
+        killTimes = row[["<30s", "30-60s", "60-90s", "90-120s", "120-150s", "150-180s", "Post-Plant"]].values
+        plantStats = row[["Plant", "Defuse"]].values
         spawnStats = row[atkSpawns].values
         opAStats = row[atkOps].values
         opDStats = row[defOps].values
 
         fig, ax = plt.subplots(2, 3)
-        fig.suptitle(ID["Map"] + " : " + ID["Site"])
+        fig.suptitle(ID)
 
         def autopctAboveThreshold(pct):
             return f'{pct:.1f}%' if pct > displayThreshold * 100 else ''
@@ -64,6 +77,7 @@ def visualize(jsonFiles: list[str], displayThreshold=0.04):
         ax[1, 1].set_title("Spawns")
 
         winCons = [plantStats[0] - plantStats[1], plantStats[1], 1 - plantStats[0]]
+        print(winCons)
         ax[1, 2].pie(winCons, labels=["Plant", "Defuse", "Kill"], autopct=autopctAboveThreshold, rotatelabels=True)
         ax[1, 2].set_title("Win Conditions")
 
@@ -71,5 +85,6 @@ def visualize(jsonFiles: list[str], displayThreshold=0.04):
     plt.show()
 
 
-files = [f.path for f in os.scandir("R6 Dissect/Outputs") if not f.is_dir()]
-visualize(files)
+if __name__ == "__main__":
+    files = [f.path for f in os.scandir("R6 Dissect/Outputs") if not f.is_dir()]
+    visualize(files, perSite=False)
