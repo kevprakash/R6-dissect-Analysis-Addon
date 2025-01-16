@@ -1,3 +1,5 @@
+from pprint import pprint
+
 import pandas as pd
 import numpy as np
 import json
@@ -8,6 +10,7 @@ idCols = ["Player ID", "Match ID", "Round Number"]
 statCols = ["Kills", "Assists", "Deaths", "Headshots", "KOST",
             "Pivot Kills", "Pivot Deaths", "Opening Kills", "Opening Deaths",
             "Trade Kills", "Traded Kills", "Traded Deaths", "Objective", "Wins", "Losses"]
+timeSlots = ["<30s", "30-60s", "60-90s", "90-120s", "120-150s", "150-180s", "Post-Plant", "Plant", "Defuse"]
 
 
 def analyzeMatches(jsons: list[str], shouldCompile=True):
@@ -209,6 +212,182 @@ def compileStats(df):
     df["Traded Death Ratio"] = df["Traded Deaths"] / np.where(df["Deaths"] < 1, 1, df["Deaths"])
 
     return df
+
+
+def metaAnalysisMatch(jsonData: str):
+    with open(jsonData, 'r') as f:
+        data = json.load(f)
+
+    # pprint(data)
+
+    compiledStats = {
+        "Map": [],
+        "Site": [],
+        "Attacker Win": [],
+        "Defender Win": [],
+        "<30s": [],
+        "30-60s": [],
+        "60-90s": [],
+        "90-120s": [],
+        "120-150s": [],
+        "150-180s": [],
+        "Post-Plant": [],
+        "Plant": [],
+        "Defuse": []
+    }
+
+    operators = set(), set()    # ATK, DEF
+    spawns = set(), set()       # ATK, DEF
+
+    for i in range(len(data["rounds"])):
+        r = data["rounds"][i]
+        players = r["players"]
+        gameMap = r['map']['name']
+        site = r['site']
+        teams = r['teams']
+
+        firstAttack = teams[0]['role'] == 'Attack'
+
+        compiledStats["Map"].append(gameMap)
+        compiledStats["Site"].append(site)
+
+        for p in players:
+            operator = p['operator']['name']
+            spawn = p['spawn']
+            isTeam1 = p['teamIndex'] == 0
+
+            opPool = operators[0] if (firstAttack == isTeam1) else operators[1]
+            spawnPool = spawns[0] if (firstAttack == isTeam1) else spawns[1]
+
+            opPool.add(operator)
+            spawnPool.add(spawn)
+
+            if operator in compiledStats.keys():
+                o = compiledStats[operator]
+                while len(o) <= i:
+                    o.append(0)
+                o[-1] += 1
+            else:
+                compiledStats[operator] = [0 for _ in range(i)] + [1]
+
+            if spawn in compiledStats.keys():
+                s = compiledStats[spawn]
+                while len(s) <= i:
+                    s.append(0)
+                s[-1] += 1
+            else:
+                compiledStats[spawn] = [0 for _ in range(i)] + [1]
+
+        for o in operators[0].union(operators[1]):
+            while len(compiledStats[o]) <= i:
+                compiledStats[o].append(0)
+
+        for s in spawns[0].union(spawns[1]):
+            while len(compiledStats[s]) <= i:
+                compiledStats[s].append(0)
+
+        atkWin = False
+        defWin = False
+        winCondition = None
+        for t in r["teams"]:
+            if t["won"]:
+                if t["role"] == 'Attack':
+                    atkWin = True
+                else:
+                    defWin = True
+                if 'winCondition' in t.keys():
+                    winCondition = t['winCondition']
+
+        if atkWin and defWin:
+            if winCondition == 'DisabledDefuser':
+                compiledStats["Attacker Win"].append(0)
+                compiledStats["Defender Win"].append(1)
+            elif winCondition == 'DefusedBomb':
+                compiledStats["Attacker Win"].append(1)
+                compiledStats["Defender Win"].append(0)
+        else:
+            if atkWin:
+                compiledStats["Attacker Win"].append(1)
+                compiledStats["Defender Win"].append(0)
+            elif defWin:
+                compiledStats["Attacker Win"].append(0)
+                compiledStats["Defender Win"].append(1)
+
+        for t in timeSlots:
+            compiledStats[t].append(0)
+
+        postPlant = False
+        for feedback in r['matchFeedback']:
+            if feedback['type']['id'] == 3:
+                postPlant = True
+                compiledStats["Plant"][-1] += 1
+            elif feedback['type']['id'] == 5:
+                compiledStats['Defuse'][-1] += 1
+            elif feedback['type']['id'] == 0:
+                if postPlant:
+                    compiledStats["Post-Plant"][-1] += 1
+                else:
+                    killTime = feedback['timeInSeconds']
+                    if killTime < 30:
+                        compiledStats["<30s"][-1] += 1
+                    elif killTime < 60:
+                        compiledStats["30-60s"][-1] += 1
+                    elif killTime < 90:
+                        compiledStats["60-90s"][-1] += 1
+                    elif killTime < 120:
+                        compiledStats["90-120s"][-1] += 1
+                    elif killTime < 150:
+                        compiledStats["120-150s"][-1] += 1
+                    else:
+                        compiledStats["150-180s"][-1] += 1
+
+    # pprint(compiledStats)
+
+    df = pd.DataFrame(compiledStats)
+    df = df[["Map", "Site", "Attacker Win", "Defender Win"] + timeSlots + list(spawns[0].union(spawns[1])) + list(operators[0].union(operators[1]))]
+
+    return df, spawns, operators
+
+
+def metaAnalysisMatches(jsons: list[str]):
+    dfs = []
+    spawns = set(), set()
+    operators = set(), set()
+    for j in jsons:
+        d, s, o = metaAnalysisMatch(j)
+        dfs.append(d)
+        spawns[0].update(s[0])
+        spawns[1].update(s[1])
+        operators[0].update(o[0])
+        operators[1].update(o[1])
+        # print(len(dfs[-1]))
+
+    totalDF = pd.concat(dfs, axis=0)
+    totalDF.fillna(0, inplace=True)
+
+    # print(totalDF)
+
+    grouped = totalDF.groupby(["Map", "Site"])
+    totalDF = grouped.mean()
+    totalDF["Rounds"] = grouped.size()
+
+    columns = list(totalDF.columns)
+    columns.insert(0, columns.pop(-1))
+    totalDF = totalDF[columns].reset_index()
+
+    timeSlots = ["<30s", "30-60s", "60-90s", "90-120s", "120-150s", "150-180s", "Post-Plant", "Plant", "Defuse"]
+
+    paceDF = totalDF[["Map", "Site"] + ["<30s", "30-60s", "60-90s", "90-120s", "120-150s", "150-180s"]].copy()
+    paceMatrix = paceDF.groupby(["Map", "Site"]).sum().values
+    paceWeights = np.array([30, 60, 90, 120, 150, 180])[:, None] / 180
+    paceKills = paceMatrix @ np.ones((paceMatrix.shape[-1], 1))
+    paceMatrix = paceMatrix @ paceWeights / paceKills
+    totalDF.loc[:, "Pace"] = paceMatrix
+    totalDF.loc[:, "Kills"] = paceKills
+
+    totalDF = totalDF[["Map", "Site", "Rounds", "Attacker Win", "Defender Win", "Pace", "Kills"] + timeSlots + list(spawns[0].union(spawns[1])) + list(operators[0].union(operators[1]))]
+
+    return totalDF, spawns, operators
 
 
 def findTeamStats(dataFile: str, teamIDs: dict[str, str]):
