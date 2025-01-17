@@ -396,3 +396,22 @@ def findTeamStats(dataFile: str, teamIDs: dict[str, str]):
     df.loc[df["Player ID"].isin(teamIDs.keys()), "Player ID"] = df.loc[df["Player ID"].isin(teamIDs.keys()), "Player ID"].replace(teamIDs)
 
     return df[df["Player ID"].isin(teamIDs.values())].iloc[:, 1:].reset_index(drop=True)
+
+
+def nameFinder(jsons: list[str]):
+    idToName = {}
+    for j in jsons:
+        with open(j, 'r') as f:
+            data = json.load(f)
+            # pprint(data)
+            for r in data["rounds"]:
+                for p in r['players']:
+                    ID = p['profileID']
+                    userName = p['username']
+
+                    if ID in idToName.keys():
+                        idToName[ID].add(userName)
+                    else:
+                        idToName[ID] = {userName}
+
+    return idToName

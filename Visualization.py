@@ -20,8 +20,6 @@ def visualize(jsonFiles: list[str], displayThreshold=0.04, perSite=True):
             })
         ).reset_index()
 
-    print(mdf)
-
     atkSpawns, defSpawns = list(s[0]), list(s[1])
     atkOps, defOps = list(o[0]), list(o[1])
 
@@ -77,7 +75,6 @@ def visualize(jsonFiles: list[str], displayThreshold=0.04, perSite=True):
         ax[1, 1].set_title("Spawns")
 
         winCons = [plantStats[0] - plantStats[1], plantStats[1], 1 - plantStats[0]]
-        print(winCons)
         ax[1, 2].pie(winCons, labels=["Plant", "Defuse", "Kill"], autopct=autopctAboveThreshold, rotatelabels=True)
         ax[1, 2].set_title("Win Conditions")
 
